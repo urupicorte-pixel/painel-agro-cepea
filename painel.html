@@ -247,6 +247,32 @@
     color:var(--muted);
     font-size:13px;
   }
+  .period-toggle{
+    display:inline-flex;
+    background:var(--parchment-2);
+    border:1px solid rgba(28,43,32,.15);
+    border-radius:3px;
+    padding:3px;
+    margin-bottom:24px;
+    gap:2px;
+  }
+  .period-btn{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    letter-spacing:.02em;
+    border:none;
+    background:transparent;
+    color:var(--soil);
+    padding:8px 16px;
+    border-radius:2px;
+    cursor:pointer;
+    transition:background .15s ease;
+  }
+  .period-btn:hover{ background:rgba(107,66,38,.08); }
+  .period-btn.active{
+    background:var(--soil);
+    color:var(--parchment);
+  }
 </style>
 </head>
 <body>
@@ -260,6 +286,11 @@
 </div>
 
 <main>
+  <div class="period-toggle" id="periodToggle">
+    <button type="button" class="period-btn active" data-period="diario">Últimas semanas</button>
+    <button type="button" class="period-btn" data-period="mensal">Últimos 2 anos</button>
+  </div>
+
   <h2 class="section">Indicadores <small id="rangeLabel"></small></h2>
   <div class="grid" id="cards">
     <div class="loading">Buscando histórico atualizado...</div>
@@ -274,9 +305,10 @@
   </div>
 
   <div class="note" id="sourceNote">
-    <strong>Sobre os dados:</strong> este painel busca automaticamente o arquivo <code>historico_consolidado.csv</code>
-    gerado pelo script <code>coleta_cepea.py</code> (rodando via GitHub Actions) — toda vez que a página é aberta, ele
-    carrega a versão mais recente direto do repositório, sem precisar editar este HTML.
+    <strong>Sobre os dados:</strong> este painel busca automaticamente os arquivos <code>historico_consolidado.csv</code>
+    (diário) e <code>historico_mensal_consolidado.csv</code> (médias mensais, ~24 meses) gerados pelo script
+    <code>coleta_cepea.py</code> (rodando via GitHub Actions) — toda vez que a página é aberta, ele carrega a
+    versão mais recente direto do repositório, sem precisar editar este HTML.
   </div>
   <div class="note">
     <strong>Licença dos dados:</strong> CEPEA (CC BY-NC 4.0) — uso não comercial com atribuição à fonte.
@@ -292,10 +324,12 @@
 const GITHUB_OWNER  = "urupicorte-pixel";           // ex: "joaosilva"
 const GITHUB_REPO   = "painel-agro-cepea";     // nome sugerido do repositório
 const GITHUB_BRANCH = "main";
-const CSV_PATH       = "dados_cepea/historico_consolidado.csv";
+const CSV_PATH_DIARIO = "dados_cepea/historico_consolidado.csv";
+const CSV_PATH_MENSAL = "dados_cepea/historico_mensal_consolidado.csv";
 /* ====================================================================== */
 
-const CSV_URL = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${CSV_PATH}`;
+const CSV_URL_DIARIO = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${CSV_PATH_DIARIO}`;
+const CSV_URL_MENSAL = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${CSV_PATH_MENSAL}`;
 
 const COLOR_MAP = {
   "Boi Gordo (SP)":       "#6b4226",
@@ -310,8 +344,13 @@ const UNIT_MAP = {
   "Milho (ESALQ/B3)": "R$/sc 60kg · Indicador ESALQ/B3"
 };
 
+const PERIODOS = {
+  diario: { janelaVarDias: 30, varLabel: '30d' },
+  mensal: { janelaVarDias: 365, varLabel: '12m' }
+};
+
 // Fallback embutido, usado só se o fetch ao GitHub falhar (repo ainda não existe, offline, etc.)
-const FALLBACK_CSV = `data,Boi Gordo (SP),Bezerro (MS),Soja (Paranaguá),Milho (ESALQ/B3)
+const FALLBACK_CSV_DIARIO = `data,Boi Gordo (SP),Bezerro (MS),Soja (Paranaguá),Milho (ESALQ/B3)
 2026-07-20,337.10,3384.74,142.65,65.22
 2026-07-21,342.45,3394.05,144.17,65.29
 2026-07-22,342.65,3392.59,145.45,65.27
@@ -327,6 +366,34 @@ const FALLBACK_CSV = `data,Boi Gordo (SP),Bezerro (MS),Soja (Paranaguá),Milho (
 2026-08-05,348.55,3364.48,144.91,64.86
 2026-08-06,348.30,3356.80,144.98,64.84
 2026-08-07,347.50,3354.35,145.15,65.02`;
+
+const FALLBACK_CSV_MENSAL = `data,Boi Gordo (SP),Bezerro (MS),Soja (Paranaguá),Milho (ESALQ/B3)
+2024-09-01,255.45,2096.12,139.90,62.60
+2024-10-01,301.13,2205.46,141.83,68.79
+2024-11-01,338.76,2575.60,143.41,73.68
+2024-12-01,320.33,2672.61,141.17,72.92
+2025-01-01,324.95,2633.84,134.62,74.17
+2025-02-01,319.21,2667.64,131.57,80.76
+2025-03-01,312.47,2682.98,133.49,89.12
+2025-04-01,323.96,2821.73,134.68,83.67
+2025-05-01,308.15,2921.02,133.10,73.30
+2025-06-01,313.51,2919.72,134.40,68.15
+2025-07-01,299.97,2860.39,136.89,63.63
+2025-08-01,307.25,2854.04,140.50,63.87
+2025-09-01,307.87,2926.95,138.77,64.77
+2025-10-01,310.51,2929.97,137.86,65.35
+2025-11-01,322.08,2989.50,140.47,67.54
+2025-12-01,320.28,3064.99,142.01,69.62
+2026-01-01,320.60,3078.33,130.98,67.84
+2026-02-01,342.25,3158.74,126.33,67.86
+2026-03-01,350.18,3264.50,129.38,70.90
+2026-04-01,362.77,3356.02,127.55,67.95
+2026-05-01,348.46,3423.00,129.36,65.60
+2026-06-01,347.59,3398.86,131.81,63.68
+2026-07-01,335.50,3385.55,142.11,64.84
+2026-08-01,348.49,3362.62,144.64,65.03`;
+
+const MESES_ABREV = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
@@ -376,45 +443,109 @@ function fmt(v) {
   return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function fmtDate(iso) {
+function fmtDateDiario(iso) {
   const parts = iso.split('-');
   return `${parts[2]}/${parts[1]}`;
 }
 
-function render(series, sourceLabel, isLive) {
+function fmtDateMensal(iso) {
+  const parts = iso.split('-');
+  const mesIdx = parseInt(parts[1], 10) - 1;
+  return `${MESES_ABREV[mesIdx]}/${parts[0].slice(2)}`;
+}
+
+function fmtDateFor(iso, period) {
+  return period === 'mensal' ? fmtDateMensal(iso) : fmtDateDiario(iso);
+}
+
+// ---- Estado global: guarda as duas séries já carregadas para trocar sem novo fetch ----
+const STATE = {
+  diario: { series: null, isLive: false, sourceLabel: '' },
+  mensal: { series: null, isLive: false, sourceLabel: '' },
+  currentPeriod: 'diario'
+};
+
+// Boi gordo padrão usado nesta relação de troca: 18,5 arrobas
+const BOI_ARROBAS_REF = 18.5;
+
+function buildRatioSeries(series, numName, denName, transform) {
+  const num = series[numName];
+  const den = series[denName];
+  if (!num || !den) return null;
+  const denByDate = {};
+  den.dates.forEach((d, i) => { denByDate[d] = den.values[i]; });
+  const dates = [];
+  const values = [];
+  num.dates.forEach((d, i) => {
+    if (denByDate[d] !== undefined && denByDate[d] !== 0) {
+      dates.push(d);
+      values.push(transform(num.values[i], denByDate[d]));
+    }
+  });
+  return { dates, values };
+}
+
+function renderStatusBar() {
+  const d = STATE.diario, m = STATE.mensal;
+  const bothLive = d.isLive && m.isLive;
+  const noneLive = !d.isLive && !m.isLive;
+  document.getElementById('statusDot').classList.toggle('offline', !bothLive);
+
+  let texto;
+  if (bothLive) {
+    texto = `Dados ao vivo · ${d.sourceLabel}`;
+  } else if (noneLive) {
+    texto = `Não foi possível buscar o GitHub — mostrando dados salvos (${d.sourceLabel})`;
+  } else {
+    texto = `Dados parcialmente ao vivo — diário: ${d.isLive ? 'ok' : 'cópia local'}, mensal: ${m.isLive ? 'ok' : 'cópia local'}`;
+  }
+  document.getElementById('statusText').textContent = texto;
+
+  const existingWarn = document.getElementById('fetchWarnNote');
+  if (existingWarn) existingWarn.remove();
+  if (!bothLive) {
+    const warn = document.createElement('div');
+    warn.id = 'fetchWarnNote';
+    warn.className = 'note warn';
+    const urls = [];
+    if (!d.isLive) urls.push(CSV_URL_DIARIO);
+    if (!m.isLive) urls.push(CSV_URL_MENSAL);
+    warn.innerHTML = `<strong>Aviso:</strong> não consegui buscar ${urls.map(u => `<code>${u}</code>`).join(' e ')}. Isso é esperado até você criar o repositório GitHub e trocar <code>GITHUB_OWNER</code> no início do código deste arquivo. Por enquanto, o painel mostra os últimos dados conhecidos.`;
+    document.getElementById('sourceNote').before(warn);
+  }
+}
+
+function renderCards(period) {
+  const st = STATE[period];
+  if (!st.series) return;
+  const series = st.series;
   const names = Object.keys(series);
   const allDates = series[names[0]].dates;
+  const cfg = PERIODOS[period];
 
-  document.getElementById('statusDot').classList.toggle('offline', !isLive);
-  document.getElementById('statusText').textContent = isLive
-    ? `Dados ao vivo · ${sourceLabel}`
-    : `Não foi possível buscar o GitHub — mostrando dados salvos (${sourceLabel})`;
   document.getElementById('rangeLabel').textContent =
-    allDates.length ? `${fmtDate(allDates[0])} → ${fmtDate(allDates[allDates.length - 1])}/${allDates[allDates.length-1].slice(0,4)}` : '';
+    allDates.length ? `${fmtDateFor(allDates[0], period)} → ${fmtDateFor(allDates[allDates.length - 1], period)}` : '';
   document.getElementById('footerNote').textContent =
     `Dados: CEPEA/ESALQ (cepea.org.br) · Painel gerado por Claude · atualizado ${new Date().toLocaleString('pt-BR')}`;
 
-  if (!isLive) {
-    const warn = document.createElement('div');
-    warn.className = 'note warn';
-    warn.innerHTML = `<strong>Aviso:</strong> não consegui buscar <code>${CSV_URL}</code>. Isso é esperado até você criar o repositório GitHub e trocar <code>GITHUB_OWNER</code> no início do código deste arquivo. Por enquanto, o painel mostra os últimos dados conhecidos.`;
-    document.getElementById('sourceNote').before(warn);
+  // Ticker (sempre baseado no diário — é o "preço de agora")
+  const dTicker = STATE.diario.series;
+  if (dTicker) {
+    const ticker = document.getElementById('ticker');
+    ticker.innerHTML = '';
+    Object.keys(dTicker).forEach(name => {
+      const s = dTicker[name];
+      const last = s.values[s.values.length - 1];
+      const varr = pctVar(s.values, s.dates, 30);
+      const cls = (varr ?? 0) >= 0 ? 'up' : 'down';
+      const sign = (varr ?? 0) >= 0 ? '+' : '';
+      const div = document.createElement('div');
+      div.className = 'ticker-item';
+      div.innerHTML = `<span class="ticker-label">${name.replace(/\s*\(.*\)/, '')}</span><span class="ticker-value">${fmt(last)}</span>` +
+        (varr !== null ? `<span class="ticker-var ${cls}">${sign}${fmt(varr)}%</span>` : '');
+      ticker.appendChild(div);
+    });
   }
-
-  const ticker = document.getElementById('ticker');
-  ticker.innerHTML = '';
-  names.forEach(name => {
-    const s = series[name];
-    const last = s.values[s.values.length - 1];
-    const varr = pctVar(s.values, s.dates, 30);
-    const cls = (varr ?? 0) >= 0 ? 'up' : 'down';
-    const sign = (varr ?? 0) >= 0 ? '+' : '';
-    const div = document.createElement('div');
-    div.className = 'ticker-item';
-    div.innerHTML = `<span class="ticker-label">${name.replace(/\s*\(.*\)/, '')}</span><span class="ticker-value">${fmt(last)}</span>` +
-      (varr !== null ? `<span class="ticker-var ${cls}">${sign}${fmt(varr)}%</span>` : '');
-    ticker.appendChild(div);
-  });
 
   const cardsWrap = document.getElementById('cards');
   cardsWrap.innerHTML = '';
@@ -424,7 +555,7 @@ function render(series, sourceLabel, isLive) {
     const color = COLOR_MAP[name] || '#4c7a3d';
     const unit = UNIT_MAP[name] || '';
     const last = s.values[s.values.length - 1];
-    const varr = pctVar(s.values, s.dates, 30);
+    const varr = pctVar(s.values, s.dates, cfg.janelaVarDias);
     const cls = (varr ?? 0) >= 0 ? 'up' : 'down';
     const sign = (varr ?? 0) >= 0 ? '+' : '';
 
@@ -436,9 +567,9 @@ function render(series, sourceLabel, isLive) {
       <span class="unit">${unit}</span>
       <div class="price-row">
         <span class="price">${fmt(last)}</span>
-        ${varr !== null ? `<span class="var-month ${cls}">${sign}${fmt(varr)}% (30d)</span>` : ''}
+        ${varr !== null ? `<span class="var-month ${cls}">${sign}${fmt(varr)}% (${cfg.varLabel})</span>` : ''}
       </div>
-      <span class="foot">${fmtDate(s.dates[0])} → ${fmtDate(s.dates[s.dates.length - 1])}</span>
+      <span class="foot">${fmtDateFor(s.dates[0], period)} → ${fmtDateFor(s.dates[s.dates.length - 1], period)}</span>
       <canvas height="70"></canvas>
     `;
     cardsWrap.appendChild(card);
@@ -472,33 +603,13 @@ function render(series, sourceLabel, isLive) {
     idx++;
   });
 
-  renderTradeRatios(series);
+  renderTradeRatios(series, period);
 }
 
-// Boi gordo padrão usado nesta relação de troca: 18,5 arrobas
-const BOI_ARROBAS_REF = 18.5;
-
-function buildRatioSeries(series, numName, denName, transform) {
-  const num = series[numName];
-  const den = series[denName];
-  if (!num || !den) return null;
-  // alinha por data (as duas séries vêm do mesmo CSV, então normalmente já estão alinhadas)
-  const denByDate = {};
-  den.dates.forEach((d, i) => { denByDate[d] = den.values[i]; });
-  const dates = [];
-  const values = [];
-  num.dates.forEach((d, i) => {
-    if (denByDate[d] !== undefined && denByDate[d] !== 0) {
-      dates.push(d);
-      values.push(transform(num.values[i], denByDate[d]));
-    }
-  });
-  return { dates, values };
-}
-
-function renderTradeRatios(series) {
+function renderTradeRatios(series, period) {
   const wrap = document.getElementById('tradeCards');
   wrap.innerHTML = '';
+  const cfg = PERIODOS[period];
 
   const ratios = [
     {
@@ -522,7 +633,7 @@ function renderTradeRatios(series) {
   ratios.forEach((r, i) => {
     if (!r.data || r.data.values.length === 0) return;
     const last = r.data.values[r.data.values.length - 1];
-    const varr = pctVar(r.data.values, r.data.dates, 30);
+    const varr = pctVar(r.data.values, r.data.dates, cfg.janelaVarDias);
     const cls = (varr ?? 0) >= 0 ? 'up' : 'down';
     const sign = (varr ?? 0) >= 0 ? '+' : '';
 
@@ -534,9 +645,9 @@ function renderTradeRatios(series) {
       <span class="unit">${r.unit}</span>
       <div class="price-row">
         <span class="price">${last.toLocaleString('pt-BR', {minimumFractionDigits: r.decimals, maximumFractionDigits: r.decimals})}</span>
-        ${varr !== null ? `<span class="var-month ${cls}">${sign}${fmt(varr)}% (30d)</span>` : ''}
+        ${varr !== null ? `<span class="var-month ${cls}">${sign}${fmt(varr)}% (${cfg.varLabel})</span>` : ''}
       </div>
-      <span class="foot">${fmtDate(r.data.dates[0])} → ${fmtDate(r.data.dates[r.data.dates.length - 1])}</span>
+      <span class="foot">${fmtDateFor(r.data.dates[0], period)} → ${fmtDateFor(r.data.dates[r.data.dates.length - 1], period)}</span>
       <canvas height="70"></canvas>
     `;
     wrap.appendChild(card);
@@ -570,20 +681,43 @@ function renderTradeRatios(series) {
   });
 }
 
-async function init() {
+async function carregarPeriodo(url, fallbackCsv) {
   try {
-    const resp = await fetch(CSV_URL + `?t=${Date.now()}`, { cache: 'no-store' });
+    const resp = await fetch(url + `?t=${Date.now()}`, { cache: 'no-store' });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const text = await resp.text();
     if (!text.includes(',')) throw new Error('resposta inesperada');
     const { headers, rows } = parseCSV(text);
-    const series = buildSeries(headers, rows);
-    render(series, 'raw.githubusercontent.com', true);
+    return { series: buildSeries(headers, rows), isLive: true, sourceLabel: 'raw.githubusercontent.com' };
   } catch (err) {
-    const { headers, rows } = parseCSV(FALLBACK_CSV);
-    const series = buildSeries(headers, rows);
-    render(series, 'cópia local de 07/08/2026', false);
+    const { headers, rows } = parseCSV(fallbackCsv);
+    return { series: buildSeries(headers, rows), isLive: false, sourceLabel: 'cópia local' };
   }
+}
+
+function setupToggle() {
+  const btns = document.querySelectorAll('.period-btn');
+  btns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const period = btn.getAttribute('data-period');
+      if (period === STATE.currentPeriod) return;
+      STATE.currentPeriod = period;
+      btns.forEach(b => b.classList.toggle('active', b === btn));
+      renderCards(period);
+    });
+  });
+}
+
+async function init() {
+  setupToggle();
+  const [diario, mensal] = await Promise.all([
+    carregarPeriodo(CSV_URL_DIARIO, FALLBACK_CSV_DIARIO),
+    carregarPeriodo(CSV_URL_MENSAL, FALLBACK_CSV_MENSAL)
+  ]);
+  STATE.diario = diario;
+  STATE.mensal = mensal;
+  renderStatusBar();
+  renderCards(STATE.currentPeriod);
 }
 
 init();

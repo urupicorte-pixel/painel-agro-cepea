@@ -5,8 +5,13 @@ Coleta diária dos indicadores CEPEA/ESALQ: Boi Gordo, Bezerro, Soja e Milho.
 O que faz:
   - Baixa a tabela pública de cada indicador em cepea.org.br
   - Extrai as cotações diárias mostradas (normalmente as últimas ~15)
-  - Acrescenta ao histórico em CSV (um arquivo por commodity), sem duplicar datas
-  - Gera um arquivo consolidado 'historico_consolidado.csv' com as 4 séries lado a lado
+  - Acrescenta ao histórico DIÁRIO em CSV (um arquivo por commodity), sem duplicar datas
+  - Extrai também o histórico MENSAL (médias dos últimos 24 meses) embutido no
+    código dos gráficos de cada página — dado oficial do CEPEA, com datas exatas
+    de mês/ano, sem precisar "adivinhar" nada
+  - Gera dois arquivos consolidados:
+      historico_consolidado.csv        (diário, as 4 séries lado a lado)
+      historico_mensal_consolidado.csv (mensal, últimos ~24 meses, as 4 séries lado a lado)
 
 Como usar:
   python3 coleta_cepea.py
@@ -23,6 +28,7 @@ workflow também, é a opção mais simples de "set and forget".
 import csv
 import io
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -34,6 +40,11 @@ OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados_cepea"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; PainelAgroBot/1.0)"}
+
+MESES_PT = {
+    "janeiro": 1, "fevereiro": 2, "março": 3, "abril": 4, "maio": 5, "junho": 6,
+    "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12,
+}
 
 # key -> (nome, url, indice_da_tabela, coluna_de_valor, unidade)
 FONTES = {
@@ -68,10 +79,14 @@ FONTES = {
 }
 
 
-def baixar_tabela(url: str, indice: int) -> pd.DataFrame:
+def baixar_html(url: str) -> str:
     resp = requests.get(url, headers=HEADERS, timeout=20)
     resp.raise_for_status()
-    tabelas = pd.read_html(io.StringIO(resp.text), decimal=",", thousands=".")
+    return resp.text
+
+
+def baixar_tabela(html: str, indice: int) -> pd.DataFrame:
+    tabelas = pd.read_html(io.StringIO(html), decimal=",", thousands=".")
     return tabelas[indice]
 
 
@@ -84,29 +99,65 @@ def normalizar(df: pd.DataFrame, col_valor: str) -> pd.DataFrame:
     return df.sort_values("data")
 
 
-def atualizar_csv(chave: str, df_novo: pd.DataFrame) -> pd.DataFrame:
-    caminho = os.path.join(OUT_DIR, f"{chave}.csv")
+def extrair_serie_mensal(html: str) -> pd.DataFrame:
+    """
+    Extrai o histórico mensal (médias dos últimos ~24 meses) que fica embutido
+    no JavaScript do gráfico popup da página do indicador principal (o primeiro
+    bloco de callback = indicador oficial; blocos seguintes são séries secundárias
+    como 'Média a Prazo' ou 'Peso Médio', que ignoramos).
+    """
+    blocos = re.findall(
+        r"callbacks:\s*\{.*?open:\s*function\(\)\s*\{(.*?)\}\s*\},", html, re.DOTALL
+    )
+    if not blocos:
+        return pd.DataFrame(columns=["data", "valor"])
+    bloco = blocos[0]
+
+    m_valores = re.search(r"valor_array\[1\]\s*=\s*\[(.*?)\];", bloco)
+    m_labels = re.search(r"canvas_data\[1\]\s*=\s*\[(.*?)\];", bloco)
+    if not m_valores or not m_labels:
+        return pd.DataFrame(columns=["data", "valor"])
+
+    valores = [float(v) for v in m_valores.group(1).split(",")]
+    labels = [l.strip().strip("'") for l in m_labels.group(1).split(",")]
+
+    datas, vals = [], []
+    for label, valor in zip(labels, valores):
+        try:
+            nome_mes, ano = label.split("/")
+            mes = MESES_PT[nome_mes.strip().lower()]
+            ano_completo = 2000 + int(ano)
+            datas.append(pd.Timestamp(year=ano_completo, month=mes, day=1))
+            vals.append(valor)
+        except (KeyError, ValueError):
+            continue
+
+    return pd.DataFrame({"data": datas, "valor": vals}).sort_values("data")
+
+
+def atualizar_csv(chave: str, df_novo: pd.DataFrame, sufixo: str = "") -> pd.DataFrame:
+    caminho = os.path.join(OUT_DIR, f"{chave}{sufixo}.csv")
     if os.path.exists(caminho):
         df_antigo = pd.read_csv(caminho, parse_dates=["data"])
         combinado = pd.concat([df_antigo, df_novo], ignore_index=True)
-        combinado = combinado.drop_duplicates(subset="data").sort_values("data")
+        combinado = combinado.drop_duplicates(subset="data", keep="last").sort_values("data")
     else:
         combinado = df_novo
     combinado.to_csv(caminho, index=False, date_format="%Y-%m-%d")
     return combinado
 
 
-def gerar_consolidado():
+def gerar_consolidado(sufixo: str, nome_saida: str):
     series = {}
     for chave, (nome, _, _, _, _) in FONTES.items():
-        caminho = os.path.join(OUT_DIR, f"{chave}.csv")
+        caminho = os.path.join(OUT_DIR, f"{chave}{sufixo}.csv")
         if os.path.exists(caminho):
             df = pd.read_csv(caminho, parse_dates=["data"]).set_index("data")
             series[nome] = df["valor"]
     if not series:
         return
     consolidado = pd.DataFrame(series).sort_index()
-    consolidado.to_csv(os.path.join(OUT_DIR, "historico_consolidado.csv"))
+    consolidado.to_csv(os.path.join(OUT_DIR, nome_saida), date_format="%Y-%m-%d")
 
 
 def main():
@@ -114,20 +165,35 @@ def main():
     resumo = []
     for chave, (nome, url, indice, col_valor, unidade) in FONTES.items():
         try:
-            bruto = baixar_tabela(url, indice)
-            df = normalizar(bruto, col_valor)
-            combinado = atualizar_csv(chave, df)
-            ultimo = combinado.iloc[-1]
+            html = baixar_html(url)
+
+            # Diário (tabela pública, ~15 últimas cotações, datas exatas)
+            bruto = baixar_tabela(html, indice)
+            df_diario = normalizar(bruto, col_valor)
+            combinado_diario = atualizar_csv(chave, df_diario)
+
+            # Mensal (24 meses embutidos no gráfico, datas exatas por mês/ano)
+            df_mensal = extrair_serie_mensal(html)
+            if not df_mensal.empty:
+                combinado_mensal = atualizar_csv(chave, df_mensal, sufixo="_mensal")
+            else:
+                combinado_mensal = pd.DataFrame()
+
+            ultimo = combinado_diario.iloc[-1]
             resumo.append(
                 f"  {nome:<20} {ultimo['data'].strftime('%d/%m/%Y')}  {ultimo['valor']:.2f} {unidade}  "
-                f"({len(combinado)} registros no histórico)"
+                f"({len(combinado_diario)} registros diários, {len(combinado_mensal)} meses)"
             )
-            print(f"  OK  {nome}: {len(df)} linhas capturadas nesta rodada")
+            print(
+                f"  OK  {nome}: {len(df_diario)} linhas diárias, "
+                f"{len(df_mensal)} meses capturados nesta rodada"
+            )
         except Exception as e:
             print(f"  ERRO ao coletar {nome}: {e}", file=sys.stderr)
         time.sleep(1)  # educado com o servidor do CEPEA
 
-    gerar_consolidado()
+    gerar_consolidado("", "historico_consolidado.csv")
+    gerar_consolidado("_mensal", "historico_mensal_consolidado.csv")
 
     print("\nResumo (última cotação de cada indicador):")
     for linha in resumo:
