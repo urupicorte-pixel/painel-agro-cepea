@@ -1,0 +1,33 @@
+name: Coleta diária CEPEA
+
+on:
+  schedule:
+    # 19h30 (horário de Brasília, UTC-3) de segunda a sexta = 22h30 UTC
+    - cron: "30 22 * * 1-5"
+  workflow_dispatch: {}  # permite rodar manualmente pela aba "Actions" do GitHub
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependências
+        run: pip install pandas requests lxml
+
+      - name: Rodar coleta
+        run: python3 coleta_cepea.py
+
+      - name: Commitar dados atualizados
+        run: |
+          git config user.name "coleta-cepea-bot"
+          git config user.email "actions@github.com"
+          git add dados_cepea/
+          git diff --quiet --cached || git commit -m "Atualiza dados CEPEA $(date +'%d/%m/%Y')"
+          git push
