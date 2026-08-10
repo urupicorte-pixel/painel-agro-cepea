@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel Agro · CEPEA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root{
+    --field-dark:#1c3a2b;
+    --field-mid:#2f5c40;
+    --pasture:#4c7a3d;
+    --wheat:#c99a2e;
+    --soil:#6b4226;
+    --parchment:#f2ede1;
+    --parchment-2:#e8dfc9;
+    --clay:#a8442f;
+    --ink:#1c2b20;
+    --muted:#6d7a6c;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--parchment);
+    color:var(--ink);
+    font-family:'IBM Plex Sans',sans-serif;
+  }
+  .board{
+    background:linear-gradient(180deg,var(--field-dark),var(--field-mid));
+    color:var(--parchment);
+    padding:32px 24px 44px;
+    position:relative;
+    overflow:hidden;
+  }
+  .board::after{
+    content:"";
+    position:absolute;
+    inset:auto 0 0 0;
+    height:6px;
+    background:repeating-linear-gradient(90deg,var(--wheat) 0 18px,transparent 18px 26px);
+    opacity:.8;
+  }
+  .eyebrow{
+    font-family:'IBM Plex Mono',monospace;
+    letter-spacing:.18em;
+    text-transform:uppercase;
+    font-size:11px;
+    color:var(--wheat);
+    margin:0 0 10px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .status-dot{
+    width:7px; height:7px; border-radius:50%;
+    background:#8fd18a;
+    display:inline-block;
+    flex-shrink:0;
+  }
+  .status-dot.offline{ background:#e29a8a; }
+  h1{
+    font-family:'Zilla Slab',serif;
+    font-weight:700;
+    font-size:clamp(28px,4vw,42px);
+    margin:0 0 8px;
+    line-height:1.05;
+  }
+  .sub{
+    max-width:640px;
+    color:#d8e3d4;
+    font-size:14.5px;
+    line-height:1.55;
+    margin:0;
+  }
+  .ticker{
+    margin-top:28px;
+    display:flex;
+    gap:0;
+    flex-wrap:wrap;
+    border-top:1px solid rgba(242,237,225,.18);
+    border-bottom:1px solid rgba(242,237,225,.18);
+  }
+  .ticker-item{
+    flex:1 1 200px;
+    padding:14px 18px;
+    border-right:1px solid rgba(242,237,225,.18);
+  }
+  .ticker-item:last-child{border-right:none;}
+  .ticker-label{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--wheat);
+    display:block;
+    margin-bottom:6px;
+  }
+  .ticker-value{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:22px;
+    font-weight:500;
+  }
+  .ticker-var{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    margin-left:8px;
+  }
+  .up{color:#8fd18a;}
+  .down{color:#e29a8a;}
+
+  main{
+    max-width:1080px;
+    margin:0 auto;
+    padding:36px 24px 60px;
+  }
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    gap:18px;
+    margin-bottom:38px;
+  }
+  .card{
+    background:var(--parchment-2);
+    border:1px solid rgba(28,43,32,.1);
+    border-radius:2px;
+    padding:18px 18px 8px;
+    position:relative;
+  }
+  .card::before{
+    content:attr(data-index);
+    position:absolute;
+    top:14px;
+    right:16px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10px;
+    color:var(--muted);
+  }
+  .card h3{
+    font-family:'Zilla Slab',serif;
+    font-size:18px;
+    margin:0 0 2px;
+  }
+  .card .unit{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--muted);
+    display:block;
+    margin-bottom:10px;
+  }
+  .price-row{
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+    margin-bottom:2px;
+  }
+  .price{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:26px;
+    font-weight:600;
+  }
+  .var-month{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    font-weight:500;
+  }
+  .card canvas{margin-top:8px;}
+  .card .foot{
+    font-size:11px;
+    color:var(--muted);
+    margin:6px 0 10px;
+    font-family:'IBM Plex Mono',monospace;
+  }
+
+  h2.section{
+    font-family:'Zilla Slab',serif;
+    font-size:22px;
+    border-bottom:2px solid var(--soil);
+    padding-bottom:8px;
+    margin:0 0 16px;
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .section small{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--muted);
+    font-weight:400;
+  }
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    background:var(--parchment-2);
+  }
+  th,td{
+    text-align:right;
+    padding:8px 10px;
+    border-bottom:1px solid rgba(28,43,32,.08);
+    white-space:nowrap;
+  }
+  th:first-child,td:first-child{text-align:left;}
+  th{
+    font-weight:600;
+    color:var(--soil);
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    font-size:10.5px;
+    border-bottom:2px solid var(--soil);
+  }
+  .table-wrap{overflow-x:auto; margin-bottom:38px;}
+
+  .note{
+    background:#fff;
+    border-left:3px solid var(--wheat);
+    padding:14px 18px;
+    font-size:13px;
+    line-height:1.6;
+    color:var(--ink);
+    margin-bottom:10px;
+  }
+  .note.warn{ border-left-color: var(--clay); }
+  .note strong{color:var(--soil);}
+  .note code{
+    background:var(--parchment);
+    padding:1px 5px;
+    border-radius:2px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+  }
+  footer{
+    font-size:11.5px;
+    color:var(--muted);
+    text-align:center;
+    padding:20px;
+    font-family:'IBM Plex Mono',monospace;
+  }
+  .loading{
+    padding:60px 24px;
+    text-align:center;
+    font-family:'IBM Plex Mono',monospace;
+    color:var(--muted);
+    font-size:13px;
+  }
+</style>
+</head>
+<body>
+
+<div class="board">
+  <p class="eyebrow"><span class="status-dot" id="statusDot"></span><span id="statusText">Carregando dados...</span></p>
+  <h1>Painel Agro — Boi, Bezerro, Soja &amp; Milho</h1>
+  <p class="sub">Acompanhamento dos indicadores diários CEPEA/ESALQ, atualizado automaticamente a partir do histórico coletado por script agendado.</p>
+
+  <div class="ticker" id="ticker"></div>
+</div>
+
+<main>
+  <h2 class="section">Indicadores <small id="rangeLabel"></small></h2>
+  <div class="grid" id="cards">
+    <div class="loading">Buscando histórico atualizado...</div>
+  </div>
+
+  <h2 class="section">Relações de troca</h2>
+  <div class="grid" id="tradeCards"></div>
+  <div class="note">
+    <strong>Como calculamos:</strong> Boi × Bezerro usa um boi gordo padrão de 18,5@ — ou seja, quantos bezerros
+    a venda de um boi gordo permite comprar. Boi × Milho mostra quantas
+    sacas de milho uma única arroba de boi gordo compra (indicador clássico de custo de engorda/confinamento).
+  </div>
+
+  <div class="note" id="sourceNote">
+    <strong>Sobre os dados:</strong> este painel busca automaticamente o arquivo <code>historico_consolidado.csv</code>
+    gerado pelo script <code>coleta_cepea.py</code> (rodando via GitHub Actions) — toda vez que a página é aberta, ele
+    carrega a versão mais recente direto do repositório, sem precisar editar este HTML.
+  </div>
+  <div class="note">
+    <strong>Licença dos dados:</strong> CEPEA (CC BY-NC 4.0) — uso não comercial com atribuição à fonte.
+  </div>
+</main>
+
+<footer id="footerNote">Dados: CEPEA/ESALQ (cepea.org.br) · Painel gerado por Claude</footer>
+
+<script>
+/* ======================================================================
+   CONFIGURAÇÃO — troque estas 3 linhas depois de criar o repositório
+   ====================================================================== */
+const GITHUB_OWNER  = "urupicorte-pixel";           // ex: "joaosilva"
+const GITHUB_REPO   = "painel-agro-cepea";     // nome sugerido do repositório
+const GITHUB_BRANCH = "main";
+const CSV_PATH       = "dados_cepea/historico_consolidado.csv";
+/* ====================================================================== */
+
+const CSV_URL = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${CSV_PATH}`;
+
+const COLOR_MAP = {
+  "Boi Gordo (SP)":       "#6b4226",
+  "Bezerro (MS)":         "#a8442f",
+  "Soja (Paranaguá)":     "#c99a2e",
+  "Milho (ESALQ/B3)":     "#4c7a3d"
+};
+const UNIT_MAP = {
+  "Boi Gordo (SP)":   "R$/@ · Indicador CEPEA/B3 (SP)",
+  "Bezerro (MS)":     "R$/cabeça · Indicador CEPEA (MS)",
+  "Soja (Paranaguá)": "R$/sc 60kg · Indicador CEPEA (Paranaguá)",
+  "Milho (ESALQ/B3)": "R$/sc 60kg · Indicador ESALQ/B3"
+};
+
+// Fallback embutido, usado só se o fetch ao GitHub falhar (repo ainda não existe, offline, etc.)
+const FALLBACK_CSV = `data,Boi Gordo (SP),Bezerro (MS),Soja (Paranaguá),Milho (ESALQ/B3)
+2026-07-20,337.10,3384.74,142.65,65.22
+2026-07-21,342.45,3394.05,144.17,65.29
+2026-07-22,342.65,3392.59,145.45,65.27
+2026-07-23,343.75,3395.40,147.47,65.55
+2026-07-24,344.20,3388.21,148.37,65.74
+2026-07-27,344.25,3391.09,147.75,65.47
+2026-07-28,347.70,3386.98,147.89,65.22
+2026-07-29,347.40,3371.46,146.81,65.33
+2026-07-30,346.90,3377.68,145.29,65.30
+2026-07-31,346.55,3377.23,144.91,65.25
+2026-08-03,347.90,3368.30,144.04,65.24
+2026-08-04,350.20,3369.17,144.12,65.17
+2026-08-05,348.55,3364.48,144.91,64.86
+2026-08-06,348.30,3356.80,144.98,64.84
+2026-08-07,347.50,3354.35,145.15,65.02`;
+
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  const headers = lines[0].split(',').map(h => h.trim());
+  const rows = lines.slice(1).map(line => {
+    const cells = line.split(',');
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = (cells[i] || '').trim());
+    return obj;
+  });
+  return { headers, rows };
+}
+
+function buildSeries(headers, rows) {
+  const commodityCols = headers.slice(1);
+  const series = {};
+  commodityCols.forEach(col => { series[col] = { dates: [], values: [] }; });
+  rows.forEach(row => {
+    commodityCols.forEach(col => {
+      const v = parseFloat(row[col]);
+      if (!isNaN(v) && row['data']) {
+        series[col].dates.push(row['data']);
+        series[col].values.push(v);
+      }
+    });
+  });
+  return series;
+}
+
+function pctVar(values, dates, windowDays) {
+  if (values.length < 2) return null;
+  const lastIdx = values.length - 1;
+  const lastDate = new Date(dates[lastIdx]);
+  let refIdx = 0;
+  for (let i = lastIdx; i >= 0; i--) {
+    const diffDays = (lastDate - new Date(dates[i])) / (1000 * 60 * 60 * 24);
+    refIdx = i;
+    if (diffDays >= windowDays) break;
+  }
+  const last = values[lastIdx];
+  const ref = values[refIdx];
+  if (ref === 0) return null;
+  return ((last - ref) / ref) * 100;
+}
+
+function fmt(v) {
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtDate(iso) {
+  const parts = iso.split('-');
+  return `${parts[2]}/${parts[1]}`;
+}
+
+function render(series, sourceLabel, isLive) {
+  const names = Object.keys(series);
+  const allDates = series[names[0]].dates;
+
+  document.getElementById('statusDot').classList.toggle('offline', !isLive);
+  document.getElementById('statusText').textContent = isLive
+    ? `Dados ao vivo · ${sourceLabel}`
+    : `Não foi possível buscar o GitHub — mostrando dados salvos (${sourceLabel})`;
+  document.getElementById('rangeLabel').textContent =
+    allDates.length ? `${fmtDate(allDates[0])} → ${fmtDate(allDates[allDates.length - 1])}/${allDates[allDates.length-1].slice(0,4)}` : '';
+  document.getElementById('footerNote').textContent =
+    `Dados: CEPEA/ESALQ (cepea.org.br) · Painel gerado por Claude · atualizado ${new Date().toLocaleString('pt-BR')}`;
+
+  if (!isLive) {
+    const warn = document.createElement('div');
+    warn.className = 'note warn';
+    warn.innerHTML = `<strong>Aviso:</strong> não consegui buscar <code>${CSV_URL}</code>. Isso é esperado até você criar o repositório GitHub e trocar <code>GITHUB_OWNER</code> no início do código deste arquivo. Por enquanto, o painel mostra os últimos dados conhecidos.`;
+    document.getElementById('sourceNote').before(warn);
+  }
+
+  const ticker = document.getElementById('ticker');
+  ticker.innerHTML = '';
+  names.forEach(name => {
+    const s = series[name];
+    const last = s.values[s.values.length - 1];
+    const varr = pctVar(s.values, s.dates, 30);
+    const cls = (varr ?? 0) >= 0 ? 'up' : 'down';
+    const sign = (varr ?? 0) >= 0 ? '+' : '';
+    const div = document.createElement('div');
+    div.className = 'ticker-item';
+    div.innerHTML = `<span class="ticker-label">${name.replace(/\s*\(.*\)/, '')}</span><span class="ticker-value">${fmt(last)}</span>` +
+      (varr !== null ? `<span class="ticker-var ${cls}">${sign}${fmt(varr)}%</span>` : '');
+    ticker.appendChild(div);
+  });
+
+  const cardsWrap = document.getElementById('cards');
+  cardsWrap.innerHTML = '';
+  let idx = 1;
+  names.forEach(name => {
+    const s = series[name];
+    const color = COLOR_MAP[name] || '#4c7a3d';
+    const unit = UNIT_MAP[name] || '';
+    const last = s.values[s.values.length - 1];
+    const varr = pctVar(s.values, s.dates, 30);
+    const cls = (varr ?? 0) >= 0 ? 'up' : 'down';
+    const sign = (varr ?? 0) >= 0 ? '+' : '';
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.setAttribute('data-index', '0' + idx);
+    card.innerHTML = `
+      <h3>${name.replace(/\s*\(.*\)/, '')}</h3>
+      <span class="unit">${unit}</span>
+      <div class="price-row">
+        <span class="price">${fmt(last)}</span>
+        ${varr !== null ? `<span class="var-month ${cls}">${sign}${fmt(varr)}% (30d)</span>` : ''}
+      </div>
+      <span class="foot">${fmtDate(s.dates[0])} → ${fmtDate(s.dates[s.dates.length - 1])}</span>
+      <canvas height="70"></canvas>
+    `;
+    cardsWrap.appendChild(card);
+
+    try {
+      const ctx = card.querySelector('canvas').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: s.dates,
+          datasets: [{
+            data: s.values,
+            borderColor: color,
+            backgroundColor: color + '22',
+            fill: true,
+            tension: 0.35,
+            pointRadius: 0,
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false }, tooltip: { enabled: true } },
+          scales: { x: { display: false }, y: { display: false } },
+          elements: { point: { hoverRadius: 4 } }
+        }
+      });
+    } catch (chartErr) {
+      console.warn('Chart.js indisponível, seguindo sem o gráfico do card:', chartErr);
+    }
+    idx++;
+  });
+
+  renderTradeRatios(series);
+}
+
+// Boi gordo padrão usado nesta relação de troca: 18,5 arrobas
+const BOI_ARROBAS_REF = 18.5;
+
+function buildRatioSeries(series, numName, denName, transform) {
+  const num = series[numName];
+  const den = series[denName];
+  if (!num || !den) return null;
+  // alinha por data (as duas séries vêm do mesmo CSV, então normalmente já estão alinhadas)
+  const denByDate = {};
+  den.dates.forEach((d, i) => { denByDate[d] = den.values[i]; });
+  const dates = [];
+  const values = [];
+  num.dates.forEach((d, i) => {
+    if (denByDate[d] !== undefined && denByDate[d] !== 0) {
+      dates.push(d);
+      values.push(transform(num.values[i], denByDate[d]));
+    }
+  });
+  return { dates, values };
+}
+
+function renderTradeRatios(series) {
+  const wrap = document.getElementById('tradeCards');
+  wrap.innerHTML = '';
+
+  const ratios = [
+    {
+      title: 'Boi Gordo → Bezerro',
+      unit: `bezerros por boi gordo (${BOI_ARROBAS_REF.toString().replace('.', ',')}@)`,
+      color: '#a8442f',
+      decimals: 2,
+      data: buildRatioSeries(series, 'Boi Gordo (SP)', 'Bezerro (MS)',
+        (boi, bezerro) => (boi * BOI_ARROBAS_REF) / bezerro)
+    },
+    {
+      title: 'Boi Gordo → Milho',
+      unit: 'sacas de milho por @ de boi gordo',
+      color: '#4c7a3d',
+      decimals: 2,
+      data: buildRatioSeries(series, 'Boi Gordo (SP)', 'Milho (ESALQ/B3)',
+        (boi, milho) => boi / milho)
+    }
+  ];
+
+  ratios.forEach((r, i) => {
+    if (!r.data || r.data.values.length === 0) return;
+    const last = r.data.values[r.data.values.length - 1];
+    const varr = pctVar(r.data.values, r.data.dates, 30);
+    const cls = (varr ?? 0) >= 0 ? 'up' : 'down';
+    const sign = (varr ?? 0) >= 0 ? '+' : '';
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.setAttribute('data-index', '0' + (i + 1));
+    card.innerHTML = `
+      <h3>${r.title}</h3>
+      <span class="unit">${r.unit}</span>
+      <div class="price-row">
+        <span class="price">${last.toLocaleString('pt-BR', {minimumFractionDigits: r.decimals, maximumFractionDigits: r.decimals})}</span>
+        ${varr !== null ? `<span class="var-month ${cls}">${sign}${fmt(varr)}% (30d)</span>` : ''}
+      </div>
+      <span class="foot">${fmtDate(r.data.dates[0])} → ${fmtDate(r.data.dates[r.data.dates.length - 1])}</span>
+      <canvas height="70"></canvas>
+    `;
+    wrap.appendChild(card);
+
+    try {
+      const ctx = card.querySelector('canvas').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: r.data.dates,
+          datasets: [{
+            data: r.data.values,
+            borderColor: r.color,
+            backgroundColor: r.color + '22',
+            fill: true,
+            tension: 0.35,
+            pointRadius: 0,
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false }, tooltip: { enabled: true } },
+          scales: { x: { display: false }, y: { display: false } },
+          elements: { point: { hoverRadius: 4 } }
+        }
+      });
+    } catch (chartErr) {
+      console.warn('Chart.js indisponível para relação de troca:', chartErr);
+    }
+  });
+}
+
+async function init() {
+  try {
+    const resp = await fetch(CSV_URL + `?t=${Date.now()}`, { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const text = await resp.text();
+    if (!text.includes(',')) throw new Error('resposta inesperada');
+    const { headers, rows } = parseCSV(text);
+    const series = buildSeries(headers, rows);
+    render(series, 'raw.githubusercontent.com', true);
+  } catch (err) {
+    const { headers, rows } = parseCSV(FALLBACK_CSV);
+    const series = buildSeries(headers, rows);
+    render(series, 'cópia local de 07/08/2026', false);
+  }
+}
+
+init();
+</script>
+
+</body>
+</html>
